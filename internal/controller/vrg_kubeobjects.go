@@ -64,14 +64,6 @@ func (v *VRGInstance) kubeObjectsProtectPrimary(result *ctrl.Result) {
 	)
 }
 
-func (v *VRGInstance) kubeObjectsProtectSecondary(result *ctrl.Result) {
-	v.kubeObjectsProtect(result, kubeObjectsCaptureStartConditionallySecondary,
-		func() {
-			v.kubeObjectsCaptureStatusFalse(VRGConditionReasonUploading, "Kube objects capture for relocate in-progress")
-		},
-	)
-}
-
 type (
 	captureStartConditionally     func(*VRGInstance, *ctrl.Result, int64, time.Duration, time.Duration, func())
 	captureInProgressStatusUpdate func()
@@ -167,24 +159,6 @@ func (v *VRGInstance) kubeObjectsCaptureStartOrResumeOrDelay(
 			captureStartOrResume(vrg.GetGeneration(), "start")
 		},
 	)
-}
-
-func kubeObjectsCaptureStartConditionallySecondary(
-	v *VRGInstance, result *ctrl.Result,
-	captureStartGeneration int64, captureStartTimeSince, captureStartInterval time.Duration,
-	captureStart func(),
-) {
-	generation := v.instance.Generation
-	log := v.log.WithValues("generation", generation)
-
-	if captureStartGeneration == generation {
-		log.Info("Kube objects capture for relocate complete")
-
-		return
-	}
-
-	v.kubeObjectsCaptureStatusFalse(VRGConditionReasonUploading, "Kube objects capture for relocate pending")
-	captureStart()
 }
 
 func kubeObjectsCaptureStartConditionallyPrimary(
@@ -461,7 +435,8 @@ func (v *VRGInstance) kubeObjectsCaptureIdentifierUpdateComplete(
 		return
 	}
 
-	v.kubeObjectsCaptureStatus(metav1.ConditionTrue, VRGConditionReasonUploaded, clusterDataProtectedTrueMessage)
+	v.kubeObjectsCaptureStatus(metav1.ConditionTrue, VRGConditionReasonUploaded,
+		kubeObjectsClusterDataProtectedTrueMessage)
 
 	captureStartTimeSince := time.Since(captureToRecoverFromIdentifier.StartTime.Time)
 	v.log.Info("Kube objects captured", "recovery point", captureToRecoverFromIdentifier,
@@ -805,7 +780,14 @@ func (v *VRGInstance) kubeObjectProtectionDisabled(caller string) bool {
 	vrgDisabled := v.instance.Spec.KubeObjectProtection == nil
 	cmDisabled := v.ramenConfig.KubeObjectProtection.Disabled
 	disabled := vrgDisabled || cmDisabled
-	v.log.Info("Kube object protection", "disabled", disabled, "VRG", vrgDisabled, "configMap", cmDisabled, "for", caller)
+
+	status := "enabled"
+	if disabled {
+		status = "disabled"
+	}
+
+	msg := fmt.Sprintf("Kube object protection configuration is %v for operation %s", status, caller)
+	v.log.Info(msg, "is disabled in vrg", vrgDisabled, "is disabled in configMap", cmDisabled)
 
 	return disabled
 }
